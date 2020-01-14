@@ -1,10 +1,13 @@
 #!/bin/bash
 
-echo $1
-
-if [[ $1 == "record" ]]
-then
+if [[ $1 == "record" ]]; then
   rr record mrdb $2
-else
+elif [[ $1 == "replay" ]]; then
   rr replay -x mruby-rr.gdb
+else
+  echo "mruby-rr: mruby Time Travaling Recording Debugger"
+  echo "Usage:"
+  echo "$0 --help : show this help message"
+  echo "$0 record rbfile : record the execution of the ruby program"
+  echo "$0 replay : replay the execution"
 fi
