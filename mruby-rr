@@ -1,7 +1,7 @@
 #!/bin/bash
 
 if [[ $1 == "record" ]]; then
-  rr record mrdb $2
+  rr record mruby $2
 elif [[ $1 == "replay" ]]; then
   rr replay -x mruby-rr.gdb
 else

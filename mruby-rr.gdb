@@ -7,7 +7,7 @@ p dbgcmd_list(mrb,mrdb_state_get(dbg))
 end
 
 define mrb-break
-break mrdb.c:575 if $_streq(file, $arg0) == 1 && line == $arg1
+break mrr_rr_hook if $_streq(file, $arg0) == 1 && line == $arg1
 end
 
 define mrb-continue
@@ -25,14 +25,14 @@ end
 define mrb-next
 set $file = file
 set $line = line+1
-break mrdb.c:575 if $_streq(file, $file) == 1 && line == $line
+break mrr_rr_hook if $_streq(file, $file) == 1 && line == $line
 continue
 end
 
 define mrb-reverse-next
 set $file = file
 set $line = line-1
-break mrdb.c:575 if $_streq(file, $file) == 1 && line == $line
+break mrr_rr_hook if $_streq(file, $file) == 1 && line == $line
 reverse-continue
 end
 
