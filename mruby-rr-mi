@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+dev_mode = false
+if ARGV.include?("--dev")
+  dev_mode = true
+end
+rr_bin = dev_mode ? "gdb" : "rr"
+if ARGV[0] == "record"
+  if dev_mode
+  end
+elsif ARGV[1] == "replay"
+end
