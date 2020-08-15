@@ -11,20 +11,32 @@ debug=true
 
 class GDBMI
   class Input
-    attr_accessor :token, :stdin
+    attr_accessor :token, :stdin, :debug
     def initialize(gdb_stdin)
       @token = 0
       @stdin = gdb_stdin
+      @debug = true
     end
     def fmt(operation)
       "#{token}-#{operation} \n"
     end
     def exec(operation)
+      puts "(exec): #{fmt(operation)}" if debug
       stdin.write(fmt(operation))
       @token+=1
     end
-    def start
+    def exec_start
       exec("exec-run")
+    end
+    def exec_continue
+      exec("exec-continue")
+    end
+    def break_insert(line, condition)
+      condition.gsub!('"', '\\"')
+      exec("break-insert -c \"#{condition}\" #{line}")
+    end
+    def mrr_break_insert(file, line)
+      break_insert("mrr_rr_hook", "$_streq(file, \"#{file}\" == 1) && line == #{line}")
     end
   end
 end
@@ -45,15 +57,18 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
       end
     end
   end
-  token = 0
   mi_input = GDBMI::Input.new(stdin)
   while buf = Readline.readline("(mruby-rr) ", false)
-    p "token=#{token}; #{buf}" if debug
-    if buf.strip == "start"
-      mi_input.start
+    p "(input): #{buf}" if debug
+    case buf.strip
+    when "start"
+      mi_input.exec_start
+    when "continue"
+      mi_input.exec_continue
+    when /break\s+([^\s]+)\s+(\d+)/
+      mi_input.mrr_break_insert($1, $2)
     else
       stdin.puts(buf)
     end
-    token+=1
   end
 end
