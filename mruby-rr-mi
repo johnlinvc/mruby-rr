@@ -1,11 +1,59 @@
 #!/usr/bin/env ruby
-dev_mode = false
-if ARGV.include?("--dev")
-  dev_mode = true
-end
-rr_bin = dev_mode ? "gdb" : "rr"
+require 'open3'
+require 'readline'
 if ARGV[0] == "record"
-  if dev_mode
+elsif ARGV[0] == "replay"
+elsif ARGV[0] == "gdb"
+  cmd = ["gdb", '-i=mi', ARGV[1]]
+end
+debug=true
+
+
+class GDBMI
+  class Input
+    attr_accessor :token, :stdin
+    def initialize(gdb_stdin)
+      @token = 0
+      @stdin = gdb_stdin
+    end
+    def fmt(operation)
+      "#{token}-#{operation} \n"
+    end
+    def exec(operation)
+      stdin.write(fmt(operation))
+      @token+=1
+    end
+    def start
+      exec("exec-run")
+    end
   end
-elsif ARGV[1] == "replay"
+end
+
+Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
+  Thread.new do
+    loop do
+      stderr.read
+    end
+  end
+  Thread.new do
+    loop do
+      buf = stdout.readline
+      if buf.start_with?("~")
+        puts "(gdbout) #{buf}" if debug
+      else
+        puts buf
+      end
+    end
+  end
+  token = 0
+  mi_input = GDBMI::Input.new(stdin)
+  while buf = Readline.readline("(mruby-rr) ", false)
+    p "token=#{token}; #{buf}" if debug
+    if buf.strip == "start"
+      mi_input.start
+    else
+      stdin.puts(buf)
+    end
+    token+=1
+  end
 end
