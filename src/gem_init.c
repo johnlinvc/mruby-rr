@@ -10,6 +10,11 @@
 #include <mruby/opcode.h>
 #include <mruby/variable.h>
 
+#include "mrdb.h"
+#include "apibreak.h"
+#include "apilist.h"
+#include "apiprint.h"
+
 static void
 mrr_rr_hook(mrb_state *mrb, mrb_irep *irep, const mrb_code *pc, mrb_value *regs, const char *file, const int32_t line)
 {
@@ -35,3 +40,8 @@ mrb_mruby_rr_gem_init(mrb_state* mrb) {
 
 void
 mrb_mruby_rr_gem_final(mrb_state* mrb) { }
+
+void
+mrr_dummy() {
+  mrb_debug_eval(NULL, NULL, NULL, 0, NULL, 0);
+}

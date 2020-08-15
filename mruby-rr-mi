@@ -1,11 +1,19 @@
 #!/usr/bin/env ruby
 require 'open3'
 require 'readline'
-if ARGV[0] == "record"
-elsif ARGV[0] == "replay"
-elsif ARGV[0] == "gdb"
-  cmd = ["gdb", '-i=mi', ARGV[1]]
+mode = ARGV.shift
+case mode
+when "record"
+  cmd = ["rr", "record"] + ARGV
+  system(*cmd)
+  exit 0
+when "replay"
+  cmd = ["rr", "replay", '-i=mi']
+when "gdb"
+  cmd = ["gdb", '-i=mi', ARGV[0]]
+  args = ARGV[1..-1]
 end
+
 debug=true
 
 
@@ -28,15 +36,44 @@ class GDBMI
     def exec_start
       exec("exec-run")
     end
+    def exec_arguments(args)
+      exec("exec-arguments #{args.join(' ')}")
+    end
+
     def exec_continue
       exec("exec-continue")
     end
+
+    def data_eval_expr(expr)
+      expr.gsub!('"', '\\"')
+      exec("data-evaluate-expression \"#{expr}\"")
+    end
+
     def break_insert(line, condition)
       condition.gsub!('"', '\\"')
       exec("break-insert -c \"#{condition}\" #{line}")
     end
+
+    def gdb_set(expr)
+      exec("gdb-set #{expr}")
+    end
+
     def mrr_break_insert(file, line)
-      break_insert("mrr_rr_hook", "$_streq(file, \"#{file}\" == 1) && line == #{line}")
+      #break_insert("mrr_rr_hook", "$_streq((char*)file, \"#{file}\" == 1) && line == #{line}")
+      break_insert("mrr_rr_hook", "$_streq(file, \"#{file}\") == 1 && line == #{line}")
+    end
+
+    def mrr_next
+      gdb_set("$file = file")
+      gdb_set("$line = line+1")
+      break_insert("mrr_rr_hook", "$_streq((char*)file, $file == 1) && line == $line")
+    end
+
+    def mrr_eval(rb_expr)
+      len = rb_expr.size
+      rb_expr.gsub!('"', '\\"')
+      expr = "mrb_debug_eval(mrb, dbg, \"#{rb_expr}\", #{len}, NULL, 0)"
+      data_eval_expr(expr)
     end
   end
 end
@@ -62,11 +99,16 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
     p "(input): #{buf}" if debug
     case buf.strip
     when "start"
+      mi_input.exec_arguments(args) if mode == "gdb"
       mi_input.exec_start
     when "continue"
       mi_input.exec_continue
     when /break\s+([^\s]+)\s+(\d+)/
       mi_input.mrr_break_insert($1, $2)
+    when /eval\s+(.*)/
+      mi_input.mrr_eval($1)
+    when "next"
+      mi_input.mrr_next
     else
       stdin.puts(buf)
     end
