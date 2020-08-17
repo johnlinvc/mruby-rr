@@ -60,13 +60,13 @@ class GDBMI
 
     def mrr_break_insert(file, line)
       #break_insert("mrr_rr_hook", "$_streq((char*)file, \"#{file}\" == 1) && line == #{line}")
-      break_insert("mrr_rr_hook", "$_streq(file, \"#{file}\") == 1 && line == #{line}")
+      break_insert("mrr_rr_hook", "$_streq(dbg->file, \"#{file}\") == 1 && dbg->line == #{line}")
     end
 
     def mrr_next
       gdb_set("$file = file")
       gdb_set("$line = line+1")
-      break_insert("mrr_rr_hook", "$_streq((char*)file, $file == 1) && line == $line")
+      break_insert("mrr_rr_hook", "$_streq((char*)dbg->file, $file == 1) && dbg->line == $line")
     end
 
     def mrr_eval(rb_expr)
