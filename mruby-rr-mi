@@ -81,9 +81,13 @@ end
 
 class RR
   class State
-    attr_accessor :current_file, :current_line
+    attr_accessor :current_file, :current_line, :prev_file, :prev_line
     def current_line=(val)
       @current_line = val.to_i
+    end
+    def inspect
+      puts "current_line: #{current_line}"
+      puts "current_file: #{current_file}"
     end
     def list(file=nil, line=nil, line_count=10)
       file ||= current_file
@@ -92,10 +96,30 @@ class RR
       end_line = start_line + line_count
       range = start_line..end_line
       File.open(file).each_line.with_index do |l,i|
-        next unless range.include?(i)
-        indicator = i == current_line ? "=>" : "  "
-        puts "#{indicator} #{i}: #{l}"
+        j = i+1
+        next unless range.include?(j)
+        indicator = j == current_line ? "=>" : "  "
+        puts "#{indicator} #{j}: #{l}"
       end
+    end
+
+    def get_frame(gdb_output)
+    end
+
+    def mutate(gdb_output)
+      puts gdb_output if $debug
+      case gdb_output
+      when /^\*stopped,.*$/
+        gdb_output =~ /name="file",value="0x\h+ \\"([^\\]+)\\""},{name="line",value="(\d+)"}/
+        self.prev_file = self.current_file
+        self.prev_line = self.current_line
+        self.current_file = $1
+        self.current_line = $2
+      when /^\*running,.*/
+        nil
+      else
+      end
+      p self if $debug
     end
   end
 end
@@ -115,6 +139,8 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
         puts "(gdbout) #{buf}" if debug
       when /^=.*/
         puts "(gdbout) #{buf}" if debug
+      when /^\*.*$/
+        rr_state.mutate(buf)
       when /^\(gdb\)$/
         nil
       else
@@ -132,14 +158,13 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
     when "continue"
       mi_input.exec_continue
     when /break\s+([^\s]+)\s+(\d+)/
-      rr_state.current_file = $1
-      rr_state.current_line = $2
-      mi_input.mrr_break_insert(rr_state.current_file, rr_state.current_line)
+      mi_input.mrr_break_insert($1, $2)
     when /eval\s+(.*)/
       mi_input.mrr_eval($1)
     when "next"
       mi_input.mrr_next
     when /^l(ist)?$/
+      p rr_state
       rr_state.list
     else
       stdin.puts(buf)
