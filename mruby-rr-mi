@@ -197,6 +197,8 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
         puts "(gdbout) #{buf}" if $debug
       when /^\d*\^.*/
         puts "(gdbout) #{buf}" if $debug
+      when /^&.*/
+        puts "(gdbout) #{buf}" if $debug
       else
         puts buf
       end
