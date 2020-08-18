@@ -85,6 +85,12 @@ class RR
     def current_line=(val)
       @current_line = val.to_i
     end
+
+    def initialize
+      @mutex = Mutex.new
+      @ready = false
+    end
+
     def inspect
       puts "current_line: #{current_line}"
       puts "current_file: #{current_file}"
@@ -106,6 +112,21 @@ class RR
     def get_frame(gdb_output)
     end
 
+    def mark_not_ready!
+      @mutex.synchronize {@ready = false}
+    end
+
+    def mark_ready!
+      @mutex.synchronize {@ready = true}
+    end
+
+    def wait_till_ready
+      loop do
+        @mutex.synchronize {return if @ready}
+        sleep 0.1
+      end
+    end
+
     def mutate(gdb_output)
       puts gdb_output if $debug
       case gdb_output
@@ -115,6 +136,7 @@ class RR
         self.prev_line = self.current_line
         self.current_file = $1
         self.current_line = $2
+        self.mark_ready!
       when /^\*running,.*/
         nil
       else
@@ -143,6 +165,8 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
         rr_state.mutate(buf)
       when /^\(gdb\)$/
         nil
+      when /^\d*\^.*/
+        nil
       else
         puts buf
       end
@@ -153,10 +177,14 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
     p "(input): #{buf}" if debug
     case buf.strip
     when "start"
+      rr_state.mark_not_ready!
       mi_input.exec_arguments(args) if mode == "gdb"
       mi_input.exec_start
+      rr_state.wait_till_ready
     when "continue"
+      rr_state.mark_not_ready!
       mi_input.exec_continue
+      rr_state.wait_till_ready
     when /break\s+([^\s]+)\s+(\d+)/
       mi_input.mrr_break_insert($1, $2)
     when /eval\s+(.*)/
@@ -164,7 +192,6 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
     when "next"
       mi_input.mrr_next
     when /^l(ist)?$/
-      p rr_state
       rr_state.list
     else
       stdin.puts(buf)
