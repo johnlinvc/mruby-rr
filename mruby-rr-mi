@@ -31,8 +31,15 @@ class GDBMI
       stdin.write(fmt(operation))
       @token+=1
     end
+    def raw_exec(operation)
+      puts "(raw-exec): #{operation.strip}\n" if $debug
+      stdin.write(operation+"\n")
+    end
+    def exec_restart(checkpoint=0)
+      raw_exec("restart #{checkpoint}")
+    end
     def exec_start
-      exec("exec-run")
+      raw_exec("start")
     end
     def exec_arguments(args)
       exec("exec-arguments #{args.join(' ')}")
@@ -47,13 +54,19 @@ class GDBMI
       exec("data-evaluate-expression \"#{expr}\"")
     end
 
-    def break_insert(line, condition)
-      condition.gsub!('"', '\\"')
-      exec("break-insert -c \"#{condition}\" #{line}")
+    def break_insert(line, condition=nil, temp=false)
+      condition.gsub!('"', '\\"') if condition
+      condition_flag = condition ? " -c \"#{condition}\" " : " "
+      temp_flag = temp ? " -t " : " "
+      exec("break-insert #{temp_flag} #{condition_flag} #{line}")
     end
 
     def gdb_set(expr)
       exec("gdb-set #{expr}")
+    end
+
+    def mrr_break_on_start
+      break_insert("mrr_rr_hook", nil, true)
     end
 
     def mrr_break_insert(file, line)
@@ -78,14 +91,16 @@ end
 
 class RR
   class State
-    attr_accessor :current_file, :current_line, :prev_file, :prev_line
+    attr_accessor :current_file, :current_line, :prev_file, :prev_line, :skip_till_ruby
     def current_line=(val)
       @current_line = val.to_i
     end
 
-    def initialize
+    def initialize(mi_input)
       @mutex = Mutex.new
       @ready = false
+      @skip_till_ruby = false
+      @mi_input = mi_input
     end
 
     def inspect
@@ -95,6 +110,7 @@ class RR
     def list(file=nil, line=nil, line_count=10)
       file ||= current_file
       line ||= current_line
+      puts "no current file" unless file && line > 0
       start_line = line - (line_count/2)
       end_line = start_line + line_count
       range = start_line..end_line
@@ -120,20 +136,36 @@ class RR
     def wait_till_ready
       loop do
         @mutex.synchronize {return if @ready}
+        puts "waiting till ready" if $debug
         sleep 0.1
       end
     end
 
+    def move_cur_to_prev
+      self.prev_file = self.current_file
+      self.prev_line = self.current_line
+    end
     def mutate(gdb_output)
       puts gdb_output if $debug
       case gdb_output
-      when /^\*stopped,.*$/
-        gdb_output =~ /name="file",value="0x\h+ \\"([^\\]+)\\""},{name="line",value="(\d+)"}/
-        self.prev_file = self.current_file
-        self.prev_line = self.current_line
+      when /^\*stopped,reason="exited-normally".*$/
+        self.mark_ready!
+      when /^\*stopped,reason="signal-received".*$/
+        self.mark_ready!
+        move_cur_to_prev
+      when /^\*stopped,frame.*$/
+        self.mark_ready!
+      when /^\*stopped,reason="breakpoint-hit".*$/
+        gdb_output =~ /name="file",value="0x\h+[^\\]+\\"([^\\]+)\\""},{name="line",value="(\d+)"}/
+        move_cur_to_prev
         self.current_file = $1
         self.current_line = $2
-        self.mark_ready!
+        if self.skip_till_ruby && $1
+          self.mark_ready!
+        elsif !self.skip_till_ruby
+          self.mark_ready!
+        end
+        @mi_input.exec_continue if skip_till_ruby && !$1
       when /^\*running,.*/
         nil
       else
@@ -143,8 +175,9 @@ class RR
   end
 end
 
-rr_state = RR::State.new
 Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
+  mi_input = GDBMI::Input.new(stdin)
+  rr_state = RR::State.new(mi_input)
   Thread.new do
     loop do
       stderr.read
@@ -169,17 +202,26 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
       end
     end
   end
-  mi_input = GDBMI::Input.new(stdin)
   rr_state.wait_till_ready
+  mi_input.mrr_break_on_start
+  rr_state.skip_till_ruby=true
+  mi_input.exec_continue
   while buf = Readline.readline("(mruby-rr) ", false)
     p "(input): #{buf}" if $debug
     case buf.strip
+    when "restart"
+      rr_state.mark_not_ready!
+      mi_input.exec_restart
+      rr_state.wait_till_ready
     when "start"
       rr_state.mark_not_ready!
       mi_input.exec_arguments(args) if mode == "gdb"
       mi_input.exec_start
+      mi_input.mrr_break_on_start
+      mi_input.exec_continue
       rr_state.wait_till_ready
     when /^c(ontinue)?$/
+      rr_state.skip_till_ruby=true
       rr_state.mark_not_ready!
       mi_input.exec_continue
       rr_state.wait_till_ready
