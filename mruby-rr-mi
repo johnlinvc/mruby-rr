@@ -14,7 +14,8 @@ when "gdb"
   args = ARGV[1..-1]
 end
 
-debug=true
+debug=false
+#debug=true
 
 
 class GDBMI
@@ -23,7 +24,7 @@ class GDBMI
     def initialize(gdb_stdin)
       @token = 0
       @stdin = gdb_stdin
-      @debug = true
+      @debug = false
     end
     def fmt(operation)
       "#{token}-#{operation} \n"
@@ -59,20 +60,20 @@ class GDBMI
     end
 
     def mrr_break_insert(file, line)
-      #break_insert("mrr_rr_hook", "$_streq((char*)file, \"#{file}\" == 1) && line == #{line}")
-      break_insert("mrr_rr_hook", "$_streq(dbg->file, \"#{file}\") == 1 && dbg->line == #{line}")
+      break_insert("mrr_rr_hook", "$_streq(file, \"#{file}\") == 1 && line == #{line}")
     end
 
     def mrr_next
       gdb_set("$file = file")
       gdb_set("$line = line+1")
-      break_insert("mrr_rr_hook", "$_streq((char*)dbg->file, $file == 1) && dbg->line == $line")
+      break_insert("mrr_rr_hook", "$_streq((char*)file, $file) == 1 && line == $line")
+      exec_continue
     end
 
     def mrr_eval(rb_expr)
       len = rb_expr.size
       rb_expr.gsub!('"', '\\"')
-      expr = "mrb_debug_eval(mrb, dbg, \"#{rb_expr}\", #{len}, NULL, 0)"
+      expr = "mrr_cmd_print(mrb, dbg, \"#{rb_expr}\")"
       data_eval_expr(expr)
     end
   end
@@ -86,9 +87,14 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
   end
   Thread.new do
     loop do
-      buf = stdout.readline
-      if buf.start_with?("~")
+      buf = stdout.readline.strip
+      case buf
+      when /^~.*/
         puts "(gdbout) #{buf}" if debug
+      when /^=.*/
+        puts "(gdbout) #{buf}" if debug
+      when /^\(gdb\)$/
+        nil
       else
         puts buf
       end

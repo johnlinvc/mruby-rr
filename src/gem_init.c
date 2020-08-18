@@ -9,6 +9,7 @@
 #include <mruby/class.h>
 #include <mruby/opcode.h>
 #include <mruby/variable.h>
+#include <mruby/string.h>
 
 #include "mrdb.h"
 #include "apibreak.h"
@@ -56,8 +57,23 @@ mrr_mrb_debug_context_free(mrb_state *mrb)
   }
 }
 
+const char * mrr_cmd_print(mrb_state*mrb, mrb_debug_context * dbg, const char * cexpr)
+{
+  mrb_value expr;
+  mrb_value result;
+  const char * res_str;
+  int ai;
+
+  ai = mrb_gc_arena_save(mrb);
+  expr = mrb_str_new_cstr(mrb, cexpr);
+  result = mrb_debug_eval(mrb, dbg, RSTRING_PTR(expr), RSTRING_LEN(expr), NULL, 0);
+  res_str = RSTRING_PTR(result);
+  mrb_gc_arena_restore(mrb, ai);
+  return res_str;
+}
+
 static void
-mrr_rr_hook(mrb_state *mrb, mrb_irep *irep, const mrb_code *pc, mrb_value *regs, mrb_debug_context * dbg )
+mrr_rr_hook(mrb_state *mrb, mrb_irep *irep, const mrb_code *pc, mrb_value *regs, mrb_debug_context * dbg , const char *file, int32_t line)
 {
 	NULL;
 }
@@ -76,7 +92,7 @@ mrr_code_fetch_hook(mrb_state *mrb, mrb_irep *irep, const mrb_code *pc, mrb_valu
   file = mrb_debug_get_filename(mrb, irep, pc - irep->iseq);
   line = mrb_debug_get_line(mrb, irep, pc - irep->iseq);
   if (file == NULL || line < 0) return;
-  mrr_rr_hook(mrb, irep, pc, regs, dbg);
+  mrr_rr_hook(mrb, irep, pc, regs, dbg, file, line);
   dbg->prvfile = file;
   dbg->prvline = line;
 }
