@@ -161,16 +161,28 @@ class RR
       end
     end
 
-    def step_next
-      mark_not_done!
+    def disable_current_bp
       loc = "#{current_file}:#{current_line}"
       current_bpno = @bps.dig(loc,:bpno)
       @mi_input.break_disable(current_bpno) if current_bpno
       @temp_disabled << current_bpno
+    end
+
+    def exec_continue
+      @skip_till_ruby=true
+      disable_current_bp
+      mark_not_ready!
+      @mi_input.exec_continue
+      wait_till_ready
+    end
+
+    def step_next
+      mark_not_done!
+      disable_current_bp
       @mi_input.mrr_break_insert(current_file, current_line+1, true)
       wait_till_done
-      @mi_input.exec_continue
       mark_not_ready!
+      @mi_input.exec_continue
       wait_till_ready
     end
 
@@ -278,10 +290,7 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
       mi_input.exec_continue
       rr_state.wait_till_ready
     when /^c(ontinue)?$/
-      rr_state.skip_till_ruby=true
-      rr_state.mark_not_ready!
-      mi_input.exec_continue
-      rr_state.wait_till_ready
+      rr_state.exec_continue
     when /^b(reak)?\s+([^\s]+)\s+(\d+)/
       mi_input.mrr_break_insert($2, $3)
     when /eval\s+(.*)/
