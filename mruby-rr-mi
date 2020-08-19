@@ -49,6 +49,10 @@ class GDBMI
       exec("exec-continue")
     end
 
+    def exec_rev_continue
+      raw_exec("reverse-continue")
+    end
+
     def data_eval_expr(expr)
       expr.gsub!('"', '\\"')
       exec("data-evaluate-expression \"#{expr}\"")
@@ -168,11 +172,28 @@ class RR
       @temp_disabled << current_bpno
     end
 
+    def exec_rev_continue
+      @skip_till_ruby=true
+      disable_current_bp
+      mark_not_ready!
+      @mi_input.exec_rev_continue
+      wait_till_ready
+    end
+
     def exec_continue
       @skip_till_ruby=true
       disable_current_bp
       mark_not_ready!
       @mi_input.exec_continue
+      wait_till_ready
+    end
+
+    def step_rev_next
+      mark_not_done!
+      @mi_input.mrr_break_insert(current_file, current_line-1, true)
+      wait_till_done
+      mark_not_ready!
+      @mi_input.exec_rev_continue
       wait_till_ready
     end
 
@@ -291,12 +312,16 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
       rr_state.wait_till_ready
     when /^c(ontinue)?$/
       rr_state.exec_continue
+    when /^reverse-continue$/
+      rr_state.exec_rev_continue
     when /^b(reak)?\s+([^\s]+)\s+(\d+)/
       mi_input.mrr_break_insert($2, $3)
     when /eval\s+(.*)/
       mi_input.mrr_eval($1)
     when /^n(ext)?$/
       rr_state.step_next
+    when /^reverse-next$/
+      rr_state.step_rev_next
     when "info break"
       rr_state.list_bps
     when /^l(ist)?$/
