@@ -3,6 +3,8 @@ require 'open3'
 require 'readline'
 mode = ARGV.shift
 $debug=!!ARGV.delete("-d")
+$skip_builtin=!ARGV.delete("-b")
+$auto_list=!ARGV.delete("-a")
 case mode
 when "record"
   cmd = ["rr", "record", "mruby"] + ARGV
@@ -109,6 +111,7 @@ class RR
       @temp_disabled = []
       @mi_input = mi_input
       @bps = {}
+      @last_bpid = 0
     end
 
     def inspect
@@ -121,7 +124,9 @@ class RR
       puts "no current file" unless file && line > 0
       start_line = line - (line_count/2)
       end_line = start_line + line_count
+      start_line = [start_line,1].max
       range = start_line..end_line
+      puts "[#{start_line}, #{end_line}] in #{file}"
       File.open(file).each_line.with_index do |l,i|
         j = i+1
         next unless range.include?(j)
@@ -178,6 +183,7 @@ class RR
       mark_not_ready!
       @mi_input.exec_rev_continue
       wait_till_ready
+      list if $auto_list
     end
 
     def exec_continue
@@ -186,6 +192,7 @@ class RR
       mark_not_ready!
       @mi_input.exec_continue
       wait_till_ready
+      list if $auto_list
     end
 
     def step_rev_next
@@ -195,6 +202,7 @@ class RR
       mark_not_ready!
       @mi_input.exec_rev_continue
       wait_till_ready
+      list if $auto_list
     end
 
     def step_next
@@ -205,6 +213,7 @@ class RR
       mark_not_ready!
       @mi_input.exec_continue
       wait_till_ready
+      list if $auto_list
     end
 
     def move_cur_to_prev
@@ -215,7 +224,9 @@ class RR
       p @bps
     end
     def break_insert(file, lineno)
+      mark_not_done!
       @mi_input.mrr_break_insert(file, lineno)
+      wait_till_done
     end
     def mutate(gdb_output)
       puts gdb_output if $debug
@@ -234,16 +245,23 @@ class RR
         @temp_disabled = []
         self.current_file = $1
         self.current_line = $2
-        if self.skip_till_ruby && $1
+        if skip_till_ruby && !$1
+          @mi_input.exec_continue
+        elsif $1
+          bp_name = "#{$1}:#{$2}"
+          bp = @bps[bp_name]
+          puts "Stopped by breakpoint #{bp[:bpid]} at #{bp_name}" if bp
           self.mark_ready!
-        elsif !self.skip_till_ruby
+        else
           self.mark_ready!
         end
-        @mi_input.exec_continue if skip_till_ruby && !$1
       when /^\*running,.*/
         nil
       when /^\d+\^done,bkpt={number="(\d+)".*\_streq\(file, \\"([^\\]+)\\"\).*line == (\d+).*$/
-        @bps["#{$2}:#{$3}"]={enabled: true, bpno: $1.to_i}
+        @last_bpid+=1
+        bp_name = "#{$2}:#{$3}"
+        @bps[bp_name]={enabled: true, bpno: $1.to_i, bpid: @last_bpid}
+        puts "Created breakpoint #{@last_bpid} at #{bp_name}"
         mark_done!
       when /^\d+\^done,.*$/
         mark_done!
@@ -315,7 +333,7 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
     when /^reverse-continue$/
       rr_state.exec_rev_continue
     when /^b(reak)?\s+([^\s]+)\s+(\d+)/
-      mi_input.mrr_break_insert($2, $3)
+      rr_state.break_insert($2, $3)
     when /eval\s+(.*)/
       mi_input.mrr_eval($1)
     when /^n(ext)?$/
