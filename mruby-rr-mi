@@ -216,6 +216,12 @@ class RR
       list if $auto_list
     end
 
+    def data_eval(expr)
+      mark_not_done!
+      @mi_input.mrr_eval(expr)
+      wait_till_done
+    end
+
     def move_cur_to_prev
       self.prev_file = self.current_file
       self.prev_line = self.current_line
@@ -262,6 +268,9 @@ class RR
         bp_name = "#{$2}:#{$3}"
         @bps[bp_name]={enabled: true, bpno: $1.to_i, bpid: @last_bpid}
         puts "Created breakpoint #{@last_bpid} at #{bp_name}"
+        mark_done!
+      when /^\d+\^done,value=".*\\"([^\\]+)\\""$/
+        puts "value = #{$1}"
         mark_done!
       when /^\d+\^done,.*$/
         mark_done!
@@ -335,7 +344,7 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
     when /^b(reak)?\s+([^\s]+)\s+(\d+)/
       rr_state.break_insert($2, $3)
     when /eval\s+(.*)/
-      mi_input.mrr_eval($1)
+      rr_state.data_eval($1)
     when /^n(ext)?$/
       rr_state.step_next
     when /^reverse-next$/
