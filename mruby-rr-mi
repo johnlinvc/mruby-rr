@@ -61,6 +61,14 @@ class GDBMI
       exec("break-insert #{temp_flag} #{condition_flag} #{line}")
     end
 
+    def break_disable(bpno)
+      exec("break-disable #{bpno}")
+    end
+
+    def break_enable(bpno)
+      exec("break-enable #{bpno}")
+    end
+
     def gdb_set(expr)
       exec("gdb-set #{expr}")
     end
@@ -69,8 +77,8 @@ class GDBMI
       break_insert("mrr_rr_hook", nil, true)
     end
 
-    def mrr_break_insert(file, line)
-      break_insert("mrr_rr_hook", "$_streq(file, \"#{file}\") == 1 && line == #{line}")
+    def mrr_break_insert(file, line, temp=false)
+      break_insert("mrr_rr_hook", "$_streq(file, \"#{file}\") == 1 && line == #{line}", temp)
     end
 
     def mrr_eval(rb_expr)
@@ -87,7 +95,6 @@ class RR
     attr_accessor :current_file, :current_line, :prev_file, :prev_line, :skip_till_ruby, :bps
     def current_line=(val)
       @current_line = val.to_i
-      @bps = {}
     end
 
     def initialize(mi_input)
@@ -95,7 +102,9 @@ class RR
       @ready = false
       @done = false
       @skip_till_ruby = false
+      @temp_disabled = []
       @mi_input = mi_input
+      @bps = {}
     end
 
     def inspect
@@ -154,7 +163,11 @@ class RR
 
     def step_next
       mark_not_done!
-      @mi_input.break_insert("mrr_rr_hook", "$_streq((char*)file, \"#{current_file}\") == 1 ", true)
+      loc = "#{current_file}:#{current_line}"
+      current_bpno = @bps.dig(loc,:bpno)
+      @mi_input.break_disable(current_bpno) if current_bpno
+      @temp_disabled << current_bpno
+      @mi_input.mrr_break_insert(current_file, current_line+1, true)
       wait_till_done
       @mi_input.exec_continue
       mark_not_ready!
@@ -184,6 +197,8 @@ class RR
       when /^\*stopped,reason="breakpoint-hit".*$/
         gdb_output =~ /name="file",value="0x\h+[^\\]+\\"([^\\]+)\\""},{name="line",value="(\d+)"}/
         move_cur_to_prev
+        @temp_disabled.each { |bpno| @mi_input.break_enable(bpno) }
+        @temp_disabled = []
         self.current_file = $1
         self.current_line = $2
         if self.skip_till_ruby && $1
@@ -271,7 +286,7 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
       mi_input.mrr_break_insert($2, $3)
     when /eval\s+(.*)/
       mi_input.mrr_eval($1)
-    when "next"
+    when /^n(ext)?$/
       rr_state.step_next
     when "info break"
       rr_state.list_bps
