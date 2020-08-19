@@ -84,9 +84,10 @@ end
 
 class RR
   class State
-    attr_accessor :current_file, :current_line, :prev_file, :prev_line, :skip_till_ruby
+    attr_accessor :current_file, :current_line, :prev_file, :prev_line, :skip_till_ruby, :bps
     def current_line=(val)
       @current_line = val.to_i
+      @bps = {}
     end
 
     def initialize(mi_input)
@@ -164,6 +165,12 @@ class RR
       self.prev_file = self.current_file
       self.prev_line = self.current_line
     end
+    def list_bps
+      p @bps
+    end
+    def break_insert(file, lineno)
+      @mi_input.mrr_break_insert(file, lineno)
+    end
     def mutate(gdb_output)
       puts gdb_output if $debug
       case gdb_output
@@ -187,6 +194,9 @@ class RR
         @mi_input.exec_continue if skip_till_ruby && !$1
       when /^\*running,.*/
         nil
+      when /^\d+\^done,bkpt={number="(\d+)".*\_streq\(file, \\"([^\\]+)\\"\).*line == (\d+).*$/
+        @bps["#{$2}:#{$3}"]={enabled: true, bpno: $1.to_i}
+        mark_done!
       when /^\d+\^done,.*$/
         mark_done!
       else
@@ -225,10 +235,19 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
       end
     end
   end
-  rr_state.wait_till_ready
-  mi_input.mrr_break_on_start
-  rr_state.skip_till_ruby=true
-  mi_input.exec_continue
+  if mode!="gdb"
+    rr_state.wait_till_ready
+    mi_input.mrr_break_on_start
+    rr_state.skip_till_ruby=true
+    mi_input.exec_continue
+  else
+    rr_state.skip_till_ruby=true
+    mi_input.mrr_break_on_start
+    rr_state.mark_not_ready!
+    mi_input.exec_arguments(args)
+    mi_input.exec_start
+    rr_state.wait_till_ready
+  end
   while buf = Readline.readline("(mruby-rr) ", false)
     p "(input): #{buf}" if $debug
     case buf.strip
@@ -254,6 +273,8 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
       mi_input.mrr_eval($1)
     when "next"
       rr_state.step_next
+    when "info break"
+      rr_state.list_bps
     when /^l(ist)?$/
       rr_state.list
     when /^gdb (.*)$/
