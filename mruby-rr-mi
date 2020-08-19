@@ -73,13 +73,6 @@ class GDBMI
       break_insert("mrr_rr_hook", "$_streq(file, \"#{file}\") == 1 && line == #{line}")
     end
 
-    def mrr_next
-      gdb_set("$file = file")
-      gdb_set("$line = line+1")
-      break_insert("mrr_rr_hook", "$_streq((char*)file, $file) == 1 && line == $line")
-      exec_continue
-    end
-
     def mrr_eval(rb_expr)
       len = rb_expr.size
       rb_expr.gsub!('"', '\\"')
@@ -99,6 +92,7 @@ class RR
     def initialize(mi_input)
       @mutex = Mutex.new
       @ready = false
+      @done = false
       @skip_till_ruby = false
       @mi_input = mi_input
     end
@@ -125,6 +119,14 @@ class RR
     def get_frame(gdb_output)
     end
 
+    def mark_not_done!
+      @mutex.synchronize {@done = false}
+    end
+
+    def mark_done!
+      @mutex.synchronize {@done = true}
+    end
+
     def mark_not_ready!
       @mutex.synchronize {@ready = false}
     end
@@ -133,12 +135,29 @@ class RR
       @mutex.synchronize {@ready = true}
     end
 
+    def wait_till_done
+      loop do
+        @mutex.synchronize {return if @done}
+        puts "waiting till done" if $debug
+        sleep 0.1
+      end
+    end
+
     def wait_till_ready
       loop do
         @mutex.synchronize {return if @ready}
         puts "waiting till ready" if $debug
         sleep 0.1
       end
+    end
+
+    def step_next
+      mark_not_done!
+      @mi_input.break_insert("mrr_rr_hook", "$_streq((char*)file, \"#{current_file}\") == 1 ", true)
+      wait_till_done
+      @mi_input.exec_continue
+      mark_not_ready!
+      wait_till_ready
     end
 
     def move_cur_to_prev
@@ -168,6 +187,8 @@ class RR
         @mi_input.exec_continue if skip_till_ruby && !$1
       when /^\*running,.*/
         nil
+      when /^\d+\^done,.*$/
+        mark_done!
       else
       end
       p self if $debug
@@ -196,7 +217,7 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
       when /^\(gdb\)$/
         puts "(gdbout) #{buf}" if $debug
       when /^\d*\^.*/
-        puts "(gdbout) #{buf}" if $debug
+        rr_state.mutate(buf)
       when /^&.*/
         puts "(gdbout) #{buf}" if $debug
       else
@@ -232,7 +253,7 @@ Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
     when /eval\s+(.*)/
       mi_input.mrr_eval($1)
     when "next"
-      mi_input.mrr_next
+      rr_state.step_next
     when /^l(ist)?$/
       rr_state.list
     when /^gdb (.*)$/
